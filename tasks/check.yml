@@ -1,0 +1,121 @@
+- name: Проверка требований RAM (>= 2048 MB)
+  ansible.builtin.assert:
+    that: ansible_memtotal_mb >= 1867
+    fail_msg: "Недостаточно оперативной памяти (необходимо 2048 MB)"
+
+- name: Проверка требований CPU (>= 2)
+  ansible.builtin.assert:
+    that: ansible_processor_vcpus >= 2
+    fail_msg: "Недостаточное количество ядер (необходимо 2 ядра)"
+
+- name: Проверка пинга между хостами кластера
+  ansible.builtin.shell: |
+    ip={{ hostvars[item].ansible_host }}
+    ping -c 2 $ip > /dev/null
+  loop: "{{ groups['all'] | difference([inventory_hostname]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: output
+  changed_when: output.rc != 0
+
+- name: Проверка уникальности имён хостов
+  run_once: true
+  delegate_to: localhost
+  vars:
+    hostnames: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'ansible_hostname') }}
+    duplicate_count: >-
+      {{ (hostnames | length) - (hostnames | unique | length) }}
+  ansible.builtin.fail:
+    msg: >-
+      Обнаружено дупликатов имён: {{ duplicate_count }}
+  failed_when: duplicate_count | int > 0
+
+- name: Проверка уникальности MAC-адресов
+  run_once: true
+  delegate_to: localhost
+  vars:
+    macaddress: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, ['ansible_default_ipv4', 'macaddress']) }}
+    duplicate_count: >-
+      {{ (macaddress | length) - (macaddress | unique | length) }}
+  ansible.builtin.fail:
+    msg: >-
+      Обнаружено неуникальных MAC-адресов: {{ duplicate_count }}
+  failed_when: duplicate_count | int > 0
+
+- name: Product_uuid
+  run_once: true
+  delegate_to: localhost
+  become: true
+  ansible.builtin.debug:
+    msg: >-
+      product_uuid: {{ ansible_play_hosts_all | map('extract', hostvars, 'ansible_product_uuid') }}
+
+# Требуется become для получения product_uuid
+- name: Проверка уникальности product_uuid
+  run_once: true
+  delegate_to: localhost
+  become: true
+  vars:
+    product_uuids: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'ansible_product_uuid') }}
+    duplicate_count: >-
+      {{ (product_uuids | length) - (product_uuids | unique | length) }}
+  ansible.builtin.fail:
+    msg: >-
+      Обнаружено неуникальных product_uuid: {{ duplicate_count }}
+  failed_when: duplicate_count | int > 0
+
+- name: Проверка свободных портов для control-plane
+  ansible.builtin.shell: |
+    python3 -c '
+    import socket
+    import sys
+    s = socket.socket()
+    try:
+        s.bind(("{{ ansible_host }}", {{ item }}))
+        s.close()
+        sys.exit(0)
+    except Exception as e:
+        print(f"{e}", file=sys.stderr)
+        sys.exit(1)
+        '
+  register: port_check
+  failed_when: port_check.rc > 0
+  changed_when: port_check.rc < 0
+  loop:
+    - 6443
+    - 2379
+    - 2380
+    - 10250
+    - 10259
+    - 10257
+  when: "'masters' in group_names"
+
+- name: Проверка свободных портов для worker-node
+  ansible.builtin.shell: |
+    python3 -c '
+    import socket
+    import sys
+    s = socket.socket()
+    try:
+        s.bind(("{{ ansible_host }}", {{ item }}))
+        s.close()
+        sys.exit(0)
+    except Exception as e:
+        print(f"{e}", file=sys.stderr)
+        sys.exit(1)
+        '
+  register: port_check
+  failed_when: port_check.rc > 0
+  changed_when: port_check.rc < 0
+  loop:
+    - 10250
+    - 10256
+  when: "'workers' in group_names"
+
+- name: Версия ядра Linux >= 5.4
+  ansible.builtin.debug:
+    msg: "Версия {{ ansible_kernel }}"
+  failed_when: ansible_kernel is version('5.4', '<')

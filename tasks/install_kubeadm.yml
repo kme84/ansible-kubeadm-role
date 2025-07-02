@@ -1,0 +1,65 @@
+- name: Установка зависимостей
+  ansible.builtin.apt:
+    update_cache: true
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gpg
+    state: present
+
+- name: Скачивание публичного ключа репозитория kubernetes
+  ansible.builtin.get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key
+    dest: /tmp/release.key
+    mode: '0644'
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Копируем ключ на хосты
+  ansible.builtin.copy:
+    src: /tmp/release.key
+    dest: /tmp/release.key
+    mode: '0644'
+
+- name: Конвертируем ключ в gpg и сохраняем
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      cat /tmp/release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+    executable: /bin/bash
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  register: gpg_output
+  failed_when: gpg_output.rc > 0
+  changed_when: false
+
+- name: Добавляем репозиторий kubernetes
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    content: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /'
+    mode: '0644'
+
+- name: Установка kubeadm
+  ansible.builtin.apt:
+    update_cache: true
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+
+- name: 'Фиксируем версию {{ item }}'
+  ansible.builtin.dpkg_selections:
+    name: '{{ item }}'
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+- name: Включаем службу kubelet
+  ansible.builtin.service:
+    name: kubelet
+    state: started
+    enabled: true

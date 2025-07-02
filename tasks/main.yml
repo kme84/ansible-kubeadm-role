@@ -1,0 +1,28 @@
+- name: Предварительная проверка
+  ansible.builtin.include_tasks:
+    file: check.yml
+    apply:
+      tags: check
+  tags: check
+
+- name: Подготовка к установке kubeadm
+  ansible.builtin.include_tasks:
+    file: prepare_for_kubeadm.yml
+    apply:
+      tags: prepare
+  tags: prepare
+  when: node_swap_off
+
+- name: Установка kubeadm
+  ansible.builtin.include_tasks:
+    file: install_kubeadm.yml
+    apply:
+      tags: install
+  tags: install
+
+- name: Инициализация кластера kubeadm
+  ansible.builtin.include_tasks:
+    file: init_cluster_kubeadm.yml
+    apply:
+      tags: init
+  tags: init

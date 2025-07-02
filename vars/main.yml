@@ -1,0 +1,2 @@
+control_plane_endpoint: "{{ hostvars[groups['proxy'] | first].ansible_host }}"
+check_memory: true # Проверять хост на количество оперативной памяти (>= 2048 MB)
